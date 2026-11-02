@@ -1,0 +1,4 @@
+# Single-package repo; this file only carries pnpm settings.
+# pnpm blocks dependency install scripts by default; esbuild (used by tsx and Vite) needs its own.
+allowBuilds:
+  esbuild: true

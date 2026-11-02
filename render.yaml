@@ -1,0 +1,22 @@
+# Backup public deploy (primary demo runs on a laptop).
+services:
+  - type: web
+    name: openshelf
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    disk:
+      name: storage
+      mountPath: /app/storage
+      sizeGB: 1
+    envVars:
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false

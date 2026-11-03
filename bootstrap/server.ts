@@ -1,6 +1,6 @@
 import express, { type Express } from "express";
 import helmet from "helmet";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Container } from "./container";
 import { requestId } from "../src/api/http/middlewares/request-id";
@@ -8,6 +8,11 @@ import { errorHandler } from "../src/api/http/middlewares/error-handler";
 import { createApiRouter } from "../src/api/http/routes";
 
 const WEB_DIST = join(import.meta.dirname, "..", "dist", "web");
+const APP_VERSION = (
+  JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8")) as {
+    version: string;
+  }
+).version;
 
 /** Express app: global middleware -> api routes -> built dashboard (production) -> error handler. */
 export function createHttpApp(c: Container): Express {
@@ -24,6 +29,8 @@ export function createHttpApp(c: Container): Express {
       clock: c.clock,
       adminToken: c.env.ADMIN_TOKEN,
       dashboardOrigin: c.env.DASHBOARD_ORIGIN,
+      appVersion: APP_VERSION,
+      logger: c.logger,
     }),
   );
 

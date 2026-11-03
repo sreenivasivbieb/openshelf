@@ -1,5 +1,6 @@
 import { Router } from "express";
 import cors from "cors";
+import type { Logger } from "pino";
 import type { Services } from "../../../services";
 import type { Clock } from "../../../shared/clock";
 import { adminAuth } from "../middlewares/admin-auth";
@@ -17,6 +18,9 @@ export interface ApiOptions {
   clock: Clock;
   adminToken: string;
   dashboardOrigin: string;
+  /** package.json version, reported to MCP clients. */
+  appVersion: string;
+  logger: Logger;
 }
 
 /**
@@ -41,7 +45,13 @@ export function createApiRouter(o: ApiOptions): Router {
   const store = Router({ mergeParams: true });
   store.use(agentContext, createAgentRateLimit());
   store.use("/api", createStoreRouter(o.services));
-  store.all("/mcp", createMcpHandler(o.services));
+  store.all(
+    "/mcp",
+    createMcpHandler(o.services, {
+      version: o.appVersion,
+      onError: (err) => o.logger.error({ err }, "MCP request failed"),
+    }),
+  );
   store.get("/openapi.json", createStoreController(o.services).openapi);
   router.use("/m/:merchantId", store);
 

@@ -7,6 +7,7 @@ export async function serve(app: Express) {
   await new Promise((resolve) => server.once("listening", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return {
+    url: base,
     fetch: (path: string, init?: RequestInit) => fetch(base + path, init),
     close: () => new Promise((resolve) => server.close(resolve)),
   };

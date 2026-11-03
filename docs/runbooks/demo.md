@@ -5,7 +5,12 @@
 - [ ] `pnpm typecheck && pnpm lint && pnpm test` green
 - [ ] Fresh DB: `rm -f storage/openshelf.db* && pnpm db:migrate && pnpm db:seed`
 - [ ] PayPal sandbox: one order end to end; write its order id here: `________`
-- [ ] MCP Inspector lists 4 tools; Claude Desktop has the demo MCP URL
+- [ ] MCP Inspector (`npx @modelcontextprotocol/inspector`, Streamable HTTP,
+      `http://localhost:8787/m/m_demo/mcp`) lists 4 tools
+- [ ] Claude Desktop: `claude_desktop_config.json` bridges to the endpoint with
+      `npx -y mcp-remote http://localhost:8787/m/m_demo/mcp --header X-Agent-Id:claude-desktop` (snippet in
+      [docs/api/mcp.md](../api/mcp.md)); restart Desktop and check the 4 tools appear
+- [ ] claude.ai connector only through a public HTTPS URL (tunnel or Render), with `PUBLIC_BASE_URL` set to it
 - [ ] Render backup `/health` green; tunnel command ready
 - [ ] Backup video on the desktop
 

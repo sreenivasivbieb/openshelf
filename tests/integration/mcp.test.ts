@@ -95,7 +95,7 @@ describe("MCP endpoint (FR-13, NFR-07)", () => {
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toBeUndefined();
     const body = JSON.parse(resultText(result)) as { error: { code: string; message: string } };
-    expect(body.error).toEqual({ code: expect.any(String), message: expect.any(String) });
+    expect(body.error).toEqual({ code: "QUOTE_NOT_FOUND", message: expect.any(String) });
   });
 
   it("rejects arguments that break the input schema, without a telemetry row", async () => {

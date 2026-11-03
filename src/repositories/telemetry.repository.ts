@@ -34,9 +34,9 @@ function requestJson(request: unknown): string {
 export function createTelemetryRepository(db: Db): TelemetryRepository {
   const insert = db.prepare(
     `INSERT INTO telemetry (merchant_id, agent_id, channel, tool, request_json, outcome, error_code,
-       reason_codes, quote_id, order_id, latency_ms, is_simulated, created_at)
+       reason_codes, quote_id, order_id, latency_ms, is_simulated, agent_verified, created_at)
      VALUES (@merchantId, @agentId, @channel, @tool, @requestJson, @outcome, @errorCode,
-       @reasonCodes, @quoteId, @orderId, @latencyMs, @isSimulated, @createdAt)`,
+       @reasonCodes, @quoteId, @orderId, @latencyMs, @isSimulated, @agentVerified, @createdAt)`,
   );
 
   return {
@@ -55,6 +55,7 @@ export function createTelemetryRepository(db: Db): TelemetryRepository {
           orderId: e.orderId,
           latencyMs: e.latencyMs,
           isSimulated: e.isSimulated ? 1 : 0,
+          agentVerified: e.agentVerified ? 1 : 0,
           createdAt: e.createdAt,
         }).lastInsertRowid,
       ),

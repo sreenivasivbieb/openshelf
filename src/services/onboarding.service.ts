@@ -6,10 +6,10 @@ import { toMinor } from "../domain/money";
 import type { MerchantRepository } from "../repositories/merchant.repository";
 import type { ProductRepository } from "../repositories/product.repository";
 import type { Clock } from "../shared/clock";
-import { AppError, notImplemented } from "../shared/errors";
+import { AppError } from "../shared/errors";
 import { newId } from "../shared/ids";
 import type { IngestionReport, IngestionService } from "./ingestion.service";
-import type { FirewallService } from "./firewall.service";
+import type { FirewallService, FirewallVerdict } from "./firewall.service";
 import type { OpenApiDocument, SpecService } from "./spec.service";
 import { requireMerchant } from "./lookups";
 
@@ -28,8 +28,12 @@ export interface OnboardingService {
   /** Confirm step: strict (any row problem refuses), then the catalog is replaced as a whole. */
   commitCatalog(merchantId: string, csv: string, overrides?: ColumnOverrides): Promise<StoreInfo>;
   getStore(merchantId: string): StoreInfo;
+  /** FR-03: the spec stored at the last commit, or the template when no catalog was committed yet. */
   getSpec(merchantId: string): OpenApiDocument;
 }
+
+/** A product the firewall did not return a verdict for is never shown to agents (fail closed). */
+const NOT_SCREENED: FirewallVerdict = { status: "flagged", rules: [], reason: "not screened" };
 
 export interface OnboardingDeps {
   merchants: MerchantRepository;
@@ -64,8 +68,9 @@ function assertCommittable(report: IngestionReport): void {
 
 /**
  * FR-06 merchant registry and catalog onboarding (ADR-0001: a store is rows + a URL).
- * Commit pipeline per product: firewall screen -> sanitize agent-facing text -> description rewrite.
- * TODO(step 9): build and save the OpenAPI spec at the end of commit (template, then LLM enrichment).
+ * Commit pipeline: firewall the whole catalog (rules, then the LLM layer) -> sanitize agent-facing text
+ * -> rewrite descriptions of clean products -> replace the catalog -> build and save the OpenAPI spec
+ * (template, then LLM enrichment). Every LLM step falls back to the rule-based result (NFR-08).
  */
 export function createOnboardingService(deps: OnboardingDeps): OnboardingService {
   const baseUrl = deps.publicBaseUrl.replace(/\/+$/, "");
@@ -85,22 +90,44 @@ export function createOnboardingService(deps: OnboardingDeps): OnboardingService
     })),
   });
 
-  const toProduct = async (merchantId: string, row: ProductRow, now: string): Promise<Product> => {
-    const verdict = await deps.firewall.screen(
-      [row.name, row.description, row.category ?? ""].join("\n"),
+  /** Firewall, sanitize and rewrite a validated catalog into products ready to save. */
+  const toProducts = async (
+    merchantId: string,
+    rows: ProductRow[],
+    now: string,
+  ): Promise<Product[]> => {
+    const verdicts = await deps.firewall.screenCatalog(
+      rows.map((row) => ({
+        sku: row.sku,
+        name: row.name,
+        description: row.description,
+        category: row.category ?? null,
+      })),
     );
-    const name = sanitizeForAgents(row.name, 200) || row.sku;
-    const category = row.category ? sanitizeForAgents(row.category, 100) || null : null;
-    const cleanText = sanitizeForAgents(row.description);
-    return {
+    const drafts = rows.map((row) => ({
+      row,
+      name: sanitizeForAgents(row.name, 200) || row.sku,
+      category: row.category ? sanitizeForAgents(row.category, 100) || null : null,
+      cleanText: sanitizeForAgents(row.description),
+      verdict: verdicts.get(row.sku) ?? NOT_SCREENED,
+    }));
+    const rewrites = await deps.spec.rewriteDescriptions(
+      drafts
+        .filter((d) => d.verdict.status === "clean")
+        .map((d) => ({
+          sku: d.row.sku,
+          name: d.name,
+          category: d.category,
+          cleanText: d.cleanText,
+        })),
+    );
+    return drafts.map(({ row, name, category, cleanText, verdict }) => ({
       merchantId,
       sku: row.sku,
       name,
       descriptionRaw: row.description,
       descriptionAgent:
-        verdict.status === "clean"
-          ? await deps.spec.rewriteDescription({ name, category, cleanText })
-          : cleanText,
+        (verdict.status === "clean" ? rewrites.get(row.sku) : undefined) ?? cleanText,
       category,
       priceMinor: toMinor(row.price),
       stock: row.stock,
@@ -111,7 +138,7 @@ export function createOnboardingService(deps: OnboardingDeps): OnboardingService
       firewallStatus: verdict.status,
       firewallReason: verdict.status === "flagged" ? verdict.reason : null,
       updatedAt: now,
-    };
+    }));
   };
 
   return {
@@ -134,7 +161,7 @@ export function createOnboardingService(deps: OnboardingDeps): OnboardingService
 
     async previewCatalog(merchantId, csv, overrides = {}) {
       requireMerchant(deps.merchants, merchantId);
-      const report = await deps.ingestion.parse(csv, overrides);
+      const report = await deps.ingestion.parse(csv, overrides, { suggestMappings: true });
       return {
         headers: report.headers,
         mapping: report.mapping,
@@ -154,15 +181,22 @@ export function createOnboardingService(deps: OnboardingDeps): OnboardingService
       const report = await deps.ingestion.parse(csv, overrides);
       assertCommittable(report);
 
-      const now = deps.clock.now().toISOString();
-      const products: Product[] = [];
-      for (const row of report.rows) products.push(await toProduct(merchant.id, row, now));
+      const products = await toProducts(merchant.id, report.rows, deps.clock.now().toISOString());
       deps.products.replaceCatalog(merchant.id, products);
-      return storeInfo(merchant);
+
+      const { spec, status } = await deps.spec.build(merchant, products);
+      const specJson = JSON.stringify(spec);
+      deps.merchants.saveSpec(merchant.id, specJson, status);
+      return storeInfo({ ...merchant, specJson, specStatus: status });
     },
 
     getStore: (merchantId) => storeInfo(requireMerchant(deps.merchants, merchantId)),
 
-    getSpec: () => notImplemented("step 9"),
+    getSpec(merchantId) {
+      const merchant = requireMerchant(deps.merchants, merchantId);
+      return merchant.specJson
+        ? (JSON.parse(merchant.specJson) as OpenApiDocument)
+        : deps.spec.buildTemplate(merchant);
+    },
   };
 }

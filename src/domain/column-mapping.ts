@@ -11,6 +11,20 @@ export const REQUIRED_COLUMNS: readonly CanonicalColumn[] = [
   "return_days",
 ];
 
+/** What each column means, for the LLM mapping suggestions (step 9) and the mapping review screen. */
+export const COLUMN_MEANINGS: Record<CanonicalColumn, string> = {
+  sku: "unique product code",
+  name: "product name",
+  description: "product description text",
+  category: "product category or type",
+  price: "selling price per unit, in the store currency",
+  stock: "units available to sell",
+  shipping_days: "days until the product reaches the buyer",
+  return_days: "days the buyer has to return the product",
+  rating_avg: "average customer rating from 0 to 5",
+  review_count: "number of customer reviews",
+};
+
 /**
  * Header synonyms, most preferred first. When several headers match the same column, the most
  * preferred wins: with both "Selling Price" and "MRP", the selling price is what the buyer pays;

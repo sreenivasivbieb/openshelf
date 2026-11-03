@@ -1,10 +1,13 @@
 import { CsvError, parse } from "csv-parse/sync";
+import { z } from "zod";
 import { ProductRow, type ColumnOverrides } from "../schemas/product.schema";
 import type { RowError } from "../schemas/merchant.schema";
-import { mapColumns, type CanonicalColumn } from "../domain/column-mapping";
+import { COLUMN_MEANINGS, mapColumns, type CanonicalColumn } from "../domain/column-mapping";
 import { parseNumberCell, parseTextCell, skuFromName } from "../domain/csv-cells";
+import { sanitizeForAgents } from "../domain/firewall-rules";
 import type { LlmClient } from "../integrations/llm/llm-client";
 import { AppError } from "../shared/errors";
+import { dataBlock, MAPPING_SYSTEM } from "./prompts";
 
 export const MAX_CATALOG_ROWS = 5000;
 
@@ -28,8 +31,75 @@ export interface IngestionReport {
   errors: RowError[];
 }
 
+export interface IngestionOptions {
+  /** Ask the LLM (when configured) to suggest columns for unmapped headers. Preview only. */
+  suggestMappings?: boolean;
+}
+
 export interface IngestionService {
-  parse(csv: string, overrides?: ColumnOverrides): Promise<IngestionReport>;
+  parse(
+    csv: string,
+    overrides?: ColumnOverrides,
+    options?: IngestionOptions,
+  ): Promise<IngestionReport>;
+}
+
+const ALL_COLUMNS = Object.keys(COLUMN_MEANINGS) as CanonicalColumn[];
+const SAMPLE_VALUES = 3;
+const MappingOutput = z.object({
+  suggestions: z.array(z.object({ header: z.string(), column: z.string() })),
+});
+
+/**
+ * Step 9 mapping suggestions: only for unmapped headers, only to columns nothing is mapped to yet, each
+ * column at most once. Suggestions only; the merchant applies them on the review screen (never automatic).
+ */
+async function suggestColumns(
+  llm: LlmClient,
+  headers: string[],
+  columns: (CanonicalColumn | null)[],
+  unmapped: string[],
+  dataRows: { cells: string[] }[],
+): Promise<Record<string, CanonicalColumn>> {
+  const mapped = new Set(columns);
+  const open = ALL_COLUMNS.filter((column) => !mapped.has(column));
+  if (!open.length || !unmapped.length) return {};
+
+  const samples = unmapped.map((header) => {
+    const index = headers.indexOf(header);
+    const values = dataRows
+      .map(({ cells }) => parseTextCell(cells[index]))
+      .filter((value): value is string => value !== undefined)
+      .slice(0, SAMPLE_VALUES)
+      .map((value) => sanitizeForAgents(value, 60));
+    return { header, samples: values };
+  });
+
+  let output: z.infer<typeof MappingOutput>;
+  try {
+    output = await llm.generateObject({
+      task: "mapping",
+      system: MAPPING_SYSTEM,
+      prompt: dataBlock("columns", {
+        allowed_columns: open.map((name) => ({ name, meaning: COLUMN_MEANINGS[name] })),
+        headers: samples,
+      }),
+      schema: MappingOutput,
+      effort: "low",
+    });
+  } catch {
+    return {};
+  }
+
+  const unmappedSet = new Set(unmapped);
+  const openSet = new Set<string>(open);
+  const suggestions = new Map<string, CanonicalColumn>();
+  for (const { header, column } of output.suggestions) {
+    if (!unmappedSet.has(header) || suggestions.has(header) || !openSet.has(column)) continue;
+    if ([...suggestions.values()].includes(column as CanonicalColumn)) continue;
+    suggestions.set(header, column as CanonicalColumn);
+  }
+  return Object.fromEntries(suggestions);
 }
 
 /** Comma, semicolon (European Excel) or tab: whichever splits the header row most. */
@@ -59,17 +129,15 @@ function readCsv(csv: string): string[][] {
  * FR-01, FR-02. CSV -> header mapping -> per-row cell parsing -> ProductRow validation.
  * Every problem carries the spreadsheet row number and the merchant's own header name.
  */
-export function createIngestionService(_deps: { llm: LlmClient | null }): IngestionService {
+export function createIngestionService(deps: { llm: LlmClient | null }): IngestionService {
   return {
-    async parse(csv, overrides = {}) {
+    async parse(csv, overrides = {}, options = {}) {
       const [headerCells, ...records] = readCsv(csv);
       if (!headerCells || headerCells.every((cell) => !cell.trim())) {
         throw new AppError("INVALID_CSV", "The file is empty or has no header row.", 400);
       }
       const headers = headerCells.map((cell) => cell.trim());
       const { columns, mapping, unmapped, missingRequired } = mapColumns(headers, overrides);
-      // TODO(step 9): when an LLM is configured, suggest columns for `unmapped` headers.
-      const suggestions: Record<string, CanonicalColumn> = {};
 
       const dataRows = records
         .map((cells, i) => ({ cells, row: i + 2 })) // header is spreadsheet row 1
@@ -81,6 +149,11 @@ export function createIngestionService(_deps: { llm: LlmClient | null }): Ingest
           413,
         );
       }
+
+      const suggestions =
+        options.suggestMappings && deps.llm
+          ? await suggestColumns(deps.llm, headers, columns, unmapped, dataRows)
+          : {};
 
       const report: IngestionReport = {
         headers,

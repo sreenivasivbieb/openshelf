@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildTestApp, TEST_NOW } from "../helpers/test-app";
+import { ADMIN_AUTH, buildTestApp, TEST_NOW } from "../helpers/test-app";
 import { serve } from "../helpers/http";
 
 let http: Awaited<ReturnType<typeof serve>>;
@@ -40,7 +40,7 @@ describe("http skeleton", () => {
   });
 
   it("answers 501 for routes that are not built yet", async () => {
-    const res = await postJson("/m/m_1/api/order", JSON.stringify({ quote_id: "q_1" })); // step 5
+    const res = await http.fetch("/admin/merchants/m_1/telemetry", { headers: ADMIN_AUTH }); // step 8
     expect(res.status).toBe(501);
   });
 });

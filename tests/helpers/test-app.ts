@@ -5,29 +5,70 @@ import { connectDatabase, runMigrations } from "../../bootstrap/database";
 import { buildContainer, type Container } from "../../bootstrap/container";
 import { createHttpApp } from "../../bootstrap/server";
 import { fixedClock, type Clock } from "../../src/shared/clock";
-import type { PaymentProvider } from "../../src/integrations/payments/payment-provider";
+import { AppError } from "../../src/shared/errors";
+import type {
+  CapturePaymentInput,
+  CreatePaymentInput,
+  PaymentProvider,
+  RefundInput,
+} from "../../src/integrations/payments/payment-provider";
 import type { LlmClient } from "../../src/integrations/llm/llm-client";
 
 export const TEST_NOW = "2026-11-09T10:00:00.000Z";
 export const TEST_ADMIN_TOKEN = "test-admin-token-0123456789";
 export const ADMIN_AUTH = { authorization: `Bearer ${TEST_ADMIN_TOKEN}` };
 
-/** In-memory fake: no network. Records calls so tests can assert idempotency. */
-export function fakePayments(): PaymentProvider & { created: string[] } {
-  const created: string[] = [];
-  return {
-    created,
+/** In-memory PayPal stand-in: no network, records every call, scriptable outcomes. */
+export interface FakePayments extends PaymentProvider {
+  created: CreatePaymentInput[];
+  captured: CapturePaymentInput[];
+  refunded: RefundInput[];
+  /** What the next captures do: succeed, get refused by PayPal (FAILED), or throw like an outage. */
+  captureOutcome: "COMPLETED" | "FAILED" | "THROW";
+  /** Delay before a capture answers, to let tests overlap two captures. */
+  captureDelayMs: number;
+}
+
+export function fakePayments(): FakePayments {
+  const fake: FakePayments = {
+    created: [],
+    captured: [],
+    refunded: [],
+    captureOutcome: "COMPLETED",
+    captureDelayMs: 0,
     async createOrder(input) {
-      created.push(input.quoteId);
+      fake.created.push(input);
       return {
-        paypalOrderId: `PP-${input.quoteId}`,
-        approveUrl: `https://sandbox.paypal.test/approve/${input.quoteId}`,
+        paypalOrderId: `PP-${input.requestId}`,
+        approveUrl: `https://sandbox.paypal.test/checkoutnow?token=PP-${input.requestId}`,
       };
     },
-    async captureOrder() {
-      return { status: "COMPLETED", raw: {} };
+    async captureOrder(input) {
+      fake.captured.push(input);
+      if (fake.captureDelayMs) await new Promise((r) => setTimeout(r, fake.captureDelayMs));
+      if (fake.captureOutcome === "THROW") {
+        throw new AppError("PAYMENT_PROVIDER_ERROR", "PayPal could not capture the payment.", 502);
+      }
+      return fake.captureOutcome === "COMPLETED"
+        ? {
+            status: "COMPLETED",
+            captureId: `CAP-${input.paypalOrderId}`,
+            detail: "COMPLETED",
+            raw: {},
+          }
+        : { status: "FAILED", captureId: null, detail: "INSTRUMENT_DECLINED", raw: {} };
+    },
+    async refundCapture(input) {
+      fake.refunded.push(input);
+      return {
+        status: "COMPLETED",
+        refundId: `REF-${input.captureId}`,
+        detail: "COMPLETED",
+        raw: {},
+      };
     },
   };
+  return fake;
 }
 
 /** A clock tests can move forward, e.g. past a quote's expiry. */

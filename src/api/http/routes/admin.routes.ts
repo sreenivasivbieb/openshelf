@@ -14,5 +14,6 @@ export function createAdminRouter(services: Services): Router {
   router.get("/merchants/:merchantId/telemetry", c.feed);
   router.get("/merchants/:merchantId/quotes/summary", c.quoteSummary);
   router.get("/merchants/:merchantId/orders", c.orders);
+  router.post("/merchants/:merchantId/orders/:orderId/fulfilment", c.fulfil);
   return router;
 }

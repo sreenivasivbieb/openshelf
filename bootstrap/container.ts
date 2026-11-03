@@ -21,6 +21,9 @@ import { createOrderService } from "../src/services/order.service";
 import { createTrackingService } from "../src/services/tracking.service";
 import { createTelemetryService } from "../src/services/telemetry.service";
 import { createDashboardService } from "../src/services/dashboard.service";
+import { createAgentKeyRepository } from "../src/repositories/agent-key.repository";
+import { createAgentKeyService } from "../src/services/agent-key.service";
+import { createStorefrontService } from "../src/services/storefront.service";
 
 export interface ContainerInput {
   env: Env;
@@ -72,6 +75,12 @@ export function buildContainer(input: ContainerInput): Container {
     tracking: createTrackingService(repos),
     telemetry: createTelemetryService({ telemetry: repos.telemetry, clock }),
     dashboard: createDashboardService(repos),
+    agentKeys: createAgentKeyService({
+      agentKeys: createAgentKeyRepository(db),
+      merchants: repos.merchants,
+      clock,
+    }),
+    storefront: createStorefrontService({ ...repos, publicBaseUrl }),
   };
 
   return { ...input, services };

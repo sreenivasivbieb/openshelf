@@ -19,6 +19,11 @@ Error body: `{ "error": { "code": "<CODE>", "message": "<text>" } }`. Codes are 
 | 409  | `OUT_OF_STOCK`           | not enough stock left to order the quote                                     |
 | 409  | `PRODUCT_FLAGGED`        | the product is not available to agents                                       |
 | 409  | `INVALID_TRANSITION`     | fulfilment step out of order (only CAPTURED → SHIPPED → DELIVERED)           |
+| 409  | `NOT_RETURNABLE`         | return of an order that is not paid, or of a product sold without returns    |
+| 409  | `RETURN_WINDOW_CLOSED`   | return after the quote's `return_days` since delivery                        |
+| 401  | `INVALID_AGENT_KEY`      | `X-Agent-Key` unknown, revoked, malformed or for another store               |
+| 401  | `AGENT_KEY_REQUIRED`     | the store requires agent keys and the call had none                          |
+| 404  | `AGENT_KEY_NOT_FOUND`    | revoke of an unknown agent key                                               |
 | 413  | `PAYLOAD_TOO_LARGE`      | body over the limit (100 kB JSON, 2 MB CSV)                                  |
 | 413  | `TOO_MANY_ROWS`          | more than 5,000 products in one upload                                       |
 | 422  | `MISSING_COLUMNS`        | commit without a column for name, price, stock, shipping days or return days |

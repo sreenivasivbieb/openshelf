@@ -27,6 +27,8 @@ export interface FakePayments extends PaymentProvider {
   captureOutcome: "COMPLETED" | "FAILED" | "THROW";
   /** Delay before a capture answers, to let tests overlap two captures. */
   captureDelayMs: number;
+  /** What the next refunds do: succeed, get refused by PayPal (FAILED), or throw like an outage. */
+  refundOutcome: "COMPLETED" | "FAILED" | "THROW";
 }
 
 export function fakePayments(): FakePayments {
@@ -36,6 +38,7 @@ export function fakePayments(): FakePayments {
     refunded: [],
     captureOutcome: "COMPLETED",
     captureDelayMs: 0,
+    refundOutcome: "COMPLETED",
     async createOrder(input) {
       fake.created.push(input);
       return {
@@ -60,12 +63,12 @@ export function fakePayments(): FakePayments {
     },
     async refundCapture(input) {
       fake.refunded.push(input);
-      return {
-        status: "COMPLETED",
-        refundId: `REF-${input.captureId}`,
-        detail: "COMPLETED",
-        raw: {},
-      };
+      if (fake.refundOutcome === "THROW") {
+        throw new AppError("PAYMENT_PROVIDER_ERROR", "PayPal could not refund the payment.", 502);
+      }
+      return fake.refundOutcome === "COMPLETED"
+        ? { status: "COMPLETED", refundId: `REF-${input.captureId}`, detail: "COMPLETED", raw: {} }
+        : { status: "FAILED", refundId: null, detail: "TRANSACTION_REFUSED", raw: {} };
     },
   };
   return fake;

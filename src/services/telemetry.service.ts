@@ -67,6 +67,7 @@ export function createTelemetryService(deps: {
           tool,
           request,
           isSimulated: ctx.isSimulated,
+          agentVerified: ctx.agentVerified,
           latencyMs: Math.round(performance.now() - started),
           createdAt: deps.clock.now().toISOString(),
           ...outcome,

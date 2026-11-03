@@ -10,6 +10,7 @@ schemas the REST API uses (ADR-0004).
 | `quote`  | `sku`, `quantity` (default 1), optional guardrails                                         | pass: locked quote + `quote_hash` + `locked_terms`; fail: `reason_codes`, `actual`, `retry_hint`, `nearest_passing_sku` | not read-only, not idempotent   |
 | `order`  | `quote_id`                                                                                 | `{ order_id, quote_id, status, approve_url }`; the same quote always gives the same order                               | idempotent, open world (PayPal) |
 | `track`  | `order_id`                                                                                 | `{ order_id, status, history[] }`                                                                                       | read-only                       |
+| `return` | `order_id`, optional `reason`                                                              | `{ order_id, status, refund_id, refunded, currency, history[] }`; a repeat returns the same state (FR-17)               | destructive, idempotent         |
 
 Shapes and codes are the same as the REST API: [rest.md](rest.md), [errors.md](errors.md). On
 `initialize` the server returns its name (`openshelf-<merchant_id>`), its version, and instructions
@@ -33,9 +34,13 @@ describing the buying flow. The instructions contain no merchant-written text.
 - Every tool call that reaches OpenShelf code writes exactly one telemetry row with `channel = "mcp"`
   (NFR-06). Calls rejected by the SDK's argument check are not logged, and neither are protocol messages
   (`initialize`, `tools/list`).
-- **Agent identity is self-declared** (ADR-0009). It comes from the `X-Agent-Id` header, else from
-  `User-Agent` (first 100 characters). Because the server is stateless, the `clientInfo` a client sends
-  with `initialize` is not available to its later requests.
+- **Verified agent identity** (ADR-0012). Send an agent key from the merchant as `X-Agent-Key: osk_…`.
+  The telemetry agent id is then the key's label, with `agent_verified = 1`. A wrong or revoked key is
+  refused with HTTP 401 `INVALID_AGENT_KEY`. A store can require keys: keyless calls then get 401
+  `AGENT_KEY_REQUIRED`. Rejected calls are not logged.
+- **Without a key, identity is self-declared** (ADR-0009). It comes from the `X-Agent-Id` header, else
+  from `User-Agent` (first 100 characters). Because the server is stateless, the `clientInfo` a client
+  sends with `initialize` is not available to its later requests.
 - `X-Simulated: 1` marks simulator traffic.
 
 ## HTTP behaviour

@@ -14,6 +14,7 @@ describe("schema (NFR-03)", () => {
     expect(runMigrations(db)).toEqual([
       "001_init.sql",
       "002_search_index_and_telemetry_errors.sql",
+      "003_agent_keys.sql",
     ]);
     expect(runMigrations(db)).toEqual([]);
   });

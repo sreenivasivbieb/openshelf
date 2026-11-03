@@ -17,6 +17,7 @@
     "db:seed": "tsx scripts/seed.ts",
     "simulate": "tsx tools/simulator/run.ts",
     "paypal:smoke": "tsx scripts/paypal-smoke.ts",
+    "spec:export": "tsx scripts/export-spec.ts",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",

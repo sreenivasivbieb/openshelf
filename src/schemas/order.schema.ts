@@ -26,3 +26,20 @@ export type TrackRequest = z.infer<typeof TrackRequest>;
 /** Simulated shipping for the demo (admin only): CAPTURED -> SHIPPED -> DELIVERED. */
 export const FulfilmentRequest = z.object({ status: z.enum(["SHIPPED", "DELIVERED"]) });
 export type FulfilmentRequest = z.infer<typeof FulfilmentRequest>;
+
+/** FR-17: the buyer returns a paid order; the full locked total is refunded through PayPal. */
+export const ReturnRequest = z.object({
+  order_id: z.string().min(1).max(64),
+  reason: z.string().trim().max(500).optional(),
+});
+export type ReturnRequest = z.infer<typeof ReturnRequest>;
+
+export const ReturnResponse = z.object({
+  order_id: z.string(),
+  status: OrderStatus, // REFUNDED once the refund went through; a repeat returns the same state
+  refund_id: z.string().nullable(),
+  refunded: z.number().nullable(), // major units: the order's locked total
+  currency: z.string(),
+  history: z.array(z.object({ status: OrderStatus, at: z.string() })), // oldest first
+});
+export type ReturnResponse = z.infer<typeof ReturnResponse>;

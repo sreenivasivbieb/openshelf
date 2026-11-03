@@ -10,5 +10,6 @@ export function createStoreRouter(services: Services): Router {
   router.post("/quote", c.quote);
   router.post("/order", c.order);
   router.get("/track/:orderId", c.track);
+  router.post("/return", c.requestReturn);
   return router;
 }

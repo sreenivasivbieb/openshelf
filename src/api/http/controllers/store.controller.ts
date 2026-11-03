@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import type { Services } from "../../../services";
 import { SearchRequest } from "../../../schemas/search.schema";
 import { QuoteRequest } from "../../../schemas/quote.schema";
-import { OrderRequest } from "../../../schemas/order.schema";
+import { OrderRequest, ReturnRequest } from "../../../schemas/order.schema";
 import { getAgentContext } from "../middlewares/agent-context";
 
 /**
@@ -50,8 +50,28 @@ export function createStoreController(s: Services) {
       );
     },
 
+    /** FR-17: return a paid order and refund it. */
+    async requestReturn(req: Request, res: Response) {
+      const ctx = getAgentContext(res);
+      res.json(
+        await s.telemetry.record(ctx, "return", req.body, () =>
+          s.orders.requestReturn(ctx, ReturnRequest.parse(req.body)),
+        ),
+      );
+    },
+
     openapi(_req: Request, res: Response) {
       res.json(s.onboarding.getSpec(getAgentContext(res).merchantId));
+    },
+
+    /** Agent-readable storefront; a public document, so not an agent call in telemetry. */
+    storeMarkdown(_req: Request, res: Response) {
+      const body = s.storefront.markdown(getAgentContext(res).merchantId);
+      res.type("text/markdown; charset=utf-8").send(body);
+    },
+
+    storeJson(_req: Request, res: Response) {
+      res.json(s.storefront.describe(getAgentContext(res).merchantId));
     },
   };
 }

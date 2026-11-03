@@ -23,13 +23,18 @@ const MAX_AGENT_ID = 100;
  * client sends with `initialize` is not visible to its later requests; identity comes from headers:
  * X-Agent-Id, else User-Agent.
  */
-export function mcpAgentContext(req: Request, merchantId: string): AgentContext {
+export function mcpAgentContext(
+  req: Request,
+  merchantId: string,
+  verifiedAgentId: string | null = null,
+): AgentContext {
   const declared = req.get("x-agent-id") || req.get("user-agent");
   return {
     merchantId,
-    agentId: declared ? declared.slice(0, MAX_AGENT_ID) : null,
+    agentId: verifiedAgentId ?? (declared ? declared.slice(0, MAX_AGENT_ID) : null),
     channel: "mcp",
     isSimulated: req.get("x-simulated") === "1",
+    agentVerified: verifiedAgentId !== null, // a valid X-Agent-Key (ADR-0012)
   };
 }
 
@@ -126,7 +131,13 @@ export function createMcpHandler(
     }
     // Unknown store -> AppError MERCHANT_NOT_FOUND -> HTTP 404 via the error middleware.
     const store = services.onboarding.getStore(req.params.merchantId);
-    const ctx = mcpAgentContext(req, store.merchant_id);
+    // The agent-context middleware already checked X-Agent-Key and the store's key policy.
+    const checked = res.locals.agent as AgentContext | undefined;
+    const ctx = mcpAgentContext(
+      req,
+      store.merchant_id,
+      checked?.agentVerified ? checked.agentId : null,
+    );
 
     const server = new McpServer(
       { name: `openshelf-${store.merchant_id}`, version: options.version },

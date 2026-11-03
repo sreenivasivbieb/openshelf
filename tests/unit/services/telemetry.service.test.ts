@@ -18,6 +18,7 @@ function setup() {
     agentId: "agent-a",
     channel: "mcp",
     isSimulated: true,
+    agentVerified: false,
   };
   return { rows, telemetry, ctx };
 }

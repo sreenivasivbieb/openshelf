@@ -46,9 +46,9 @@ describe("MCP endpoint (FR-13, NFR-07)", () => {
     expect(instructions).not.toContain("Store m_demo"); // the store name is merchant data
   });
 
-  it("lists the four buyer tools with schemas and hints", async () => {
+  it("lists the buyer tools with schemas and hints", async () => {
     const { tools } = await agent.listTools();
-    expect(tools.map((t) => t.name)).toEqual(["search", "quote", "order", "track"]);
+    expect(tools.map((t) => t.name)).toEqual(["search", "quote", "order", "track", "return"]);
 
     const quote = tools.find((t) => t.name === "quote");
     expect(quote?.inputSchema.required).toEqual(["sku"]);

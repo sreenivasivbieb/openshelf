@@ -269,3 +269,62 @@ Fulfilment is simulated for the demo: only `CAPTURED → SHIPPED → DELIVERED`;
 | GET    | `/health`               | liveness                                               |
 | GET    | `/paypal/return?token=` | PayPal redirect after approval → capture (HTML page)   |
 | GET    | `/paypal/cancel`        | PayPal redirect on cancel (HTML page, nothing changes) |
+
+## Returns (FR-17)
+
+`POST /m/{id}/api/return` (also the MCP tool `return`), one telemetry row per call:
+
+```json
+{ "order_id": "o_...", "reason": "Wrong colour" }
+```
+
+- **When it is allowed.** The order is paid: `CAPTURED`, `SHIPPED`, or `DELIVERED` within the quote's
+  `return_days` of the delivery event. A product sold with `return_days` 0 has no returns.
+- **What happens:**
+  1. `RETURN_REQUESTED` is recorded, with the reason.
+  2. The captured payment is refunded in full (the locked quote total). PayPal-Request-Id is
+     `refund-<order_id>`, so PayPal never refunds twice.
+  3. `REFUNDED` is recorded and the stock is restored.
+- **Response:** `{ order_id, status, refund_id, refunded, currency, history[] }`.
+- **Errors:**
+  - an unpaid order or a product without returns → `409 NOT_RETURNABLE`;
+  - outside the window → `409 RETURN_WINDOW_CLOSED`;
+  - unknown order → `404 ORDER_NOT_FOUND`.
+- **Retries.** A failed refund answers `502 PAYMENT_PROVIDER_ERROR` and leaves the return open; calling
+  again retries it. Calling again after `REFUNDED` returns the same state and refunds nothing.
+
+## Agent keys (NFR-01, ADR-0012)
+
+Agents send `X-Agent-Key: osk_...` on `/api` and `/mcp`.
+
+- **Valid key:** the agent id in telemetry becomes the key's label, with `agent_verified = 1`.
+- **Bad key:** an unknown, malformed, revoked or other-store key gets `401 INVALID_AGENT_KEY`.
+- **Store policy:** when the store requires keys, keyless calls get `401 AGENT_KEY_REQUIRED`. Public
+  documents (`openapi.json`, `store.md`, `store.json`) never need a key.
+
+Admin routes (Bearer `ADMIN_TOKEN`):
+
+| Method | Path                                       | Purpose                                                                                    |
+| ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| POST   | `/admin/merchants/{id}/agent-keys`         | `{ label }` → `201 { id, label, key, created_at, revoked_at }`; the key is shown only here |
+| GET    | `/admin/merchants/{id}/agent-keys`         | `{ keys: [{ id, label, created_at, revoked_at }], required }`; no secrets                  |
+| DELETE | `/admin/merchants/{id}/agent-keys/{keyId}` | revoke; `404 AGENT_KEY_NOT_FOUND` for an unknown key                                       |
+| PUT    | `/admin/merchants/{id}/agent-key-policy`   | `{ required: boolean }`                                                                    |
+
+Labels: 1-60 characters, letters, digits, space, dot, dash or underscore. Only the sha256 hash of a key
+is stored, so a lost key is replaced, never recovered.
+
+## Agent-readable storefront
+
+| Method | Path                 | Returns                                                                                         |
+| ------ | -------------------- | ----------------------------------------------------------------------------------------------- |
+| GET    | `/m/{id}/store.md`   | Markdown: the store, how to buy (MCP, REST, quote/hash/approval rules), and a table of products |
+| GET    | `/m/{id}/store.json` | the same data as JSON (`Storefront` in `src/schemas/storefront.schema.ts`)                      |
+
+- **Which products:** firewall-clean and in stock, by name, at most 500 (`truncated` says if there are
+  more). Ratings are marked merchant-reported.
+- **Merchant text is escaped:** it cannot add headings, links, HTML or break the table. A flagged store
+  name is replaced with `Store <id>`.
+- These are public documents: no key is needed and they are not agent calls in telemetry.
+- `/.well-known/ucp` is not served. UCP's discovery profile advertises UCP's own shopping service and
+  checkout schema, which OpenShelf does not implement.

@@ -16,7 +16,7 @@ import {
 import { OrderRequest, OrderResponse, TrackResponse } from "../schemas/order.schema";
 import { QuoteReasonCode } from "../domain/enums";
 import type { Merchant } from "../domain/entities";
-import { matchFirewallRules, sanitizeForAgents } from "../domain/firewall-rules";
+import { agentFacingStoreName } from "../domain/store-name";
 
 // Adds `.openapi()` to zod schemas (needed by OpenAPIRegistry.register). Idempotent.
 extendZodWithOpenApi(z);
@@ -30,11 +30,7 @@ export interface TemplateInput {
   categories?: string[];
 }
 
-/** The merchant name is merchant data too: sanitized, and replaced when a firewall rule fires. */
-function displayName(merchant: Merchant): string {
-  const name = sanitizeForAgents(merchant.name, 120);
-  return name && matchFirewallRules(name).length === 0 ? name : `Store ${merchant.id}`;
-}
+const displayName = agentFacingStoreName;
 
 /**
  * The agent contract as OpenAPI components and paths, built from src/schemas (ADR-0004).

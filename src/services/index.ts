@@ -5,6 +5,8 @@ import type { OrderService } from "./order.service";
 import type { TrackingService } from "./tracking.service";
 import type { TelemetryService } from "./telemetry.service";
 import type { DashboardService } from "./dashboard.service";
+import type { AgentKeyService } from "./agent-key.service";
+import type { StorefrontService } from "./storefront.service";
 
 /** What the api layer can call. Built in bootstrap/container.ts. */
 export interface Services {
@@ -15,4 +17,6 @@ export interface Services {
   tracking: TrackingService;
   telemetry: TelemetryService;
   dashboard: DashboardService;
+  agentKeys: AgentKeyService;
+  storefront: StorefrontService;
 }

@@ -16,6 +16,7 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
     "simulate": "tsx tools/simulator/run.ts",
+    "paypal:smoke": "tsx scripts/paypal-smoke.ts",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",

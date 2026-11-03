@@ -16,5 +16,5 @@ export function createPaymentProvider(env: Env, logger: Logger): PaymentProvider
   const refuse = async (): Promise<never> => {
     throw new AppError("PAYMENT_NOT_CONFIGURED", "PayPal is not configured on this server", 503);
   };
-  return { createOrder: refuse, captureOrder: refuse };
+  return { createOrder: refuse, captureOrder: refuse, refundCapture: refuse };
 }

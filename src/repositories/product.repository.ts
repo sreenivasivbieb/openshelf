@@ -2,7 +2,6 @@ import type { Statement } from "better-sqlite3";
 import type { Db } from "./db";
 import type { Product } from "../domain/entities";
 import type { FirewallStatus } from "../domain/enums";
-import { notImplemented } from "../shared/errors";
 import { toFtsQuery } from "./fts";
 
 export interface ProductSearchFilters {
@@ -21,8 +20,13 @@ export interface ProductRepository {
   /** FTS5 bm25 over name + agent description + category; clean products only (FR-07, NFR-04). */
   search(merchantId: string, filters: ProductSearchFilters): Product[];
   listFlagged(merchantId: string): Product[];
-  /** Returns false when stock < qty. Call inside a transaction at capture (NFR-05). */
+  /**
+   * Reserves stock at capture (NFR-05): one conditional UPDATE, so it can never go negative.
+   * Returns false (and changes nothing) when the product is gone or has fewer than `qty` left.
+   */
   decrementStock(merchantId: string, sku: string, qty: number): boolean;
+  /** Gives reserved stock back when the capture fails (compensation for decrementStock). */
+  restoreStock(merchantId: string, sku: string, qty: number): void;
   countByFirewallStatus(merchantId: string): { total: number; clean: number; flagged: number };
 }
 
@@ -85,6 +89,13 @@ export function createProductRepository(db: Db): ProductRepository {
             COALESCE(SUM(firewall_status = 'flagged'), 0) AS flagged
      FROM products WHERE merchant_id = ?`,
   );
+  const decrement = db.prepare(
+    `UPDATE products SET stock = stock - @qty
+     WHERE merchant_id = @merchantId AND sku = @sku AND stock >= @qty`,
+  );
+  const restore = db.prepare(
+    `UPDATE products SET stock = stock + @qty WHERE merchant_id = @merchantId AND sku = @sku`,
+  );
   const replace = db.transaction((merchantId: string, products: Product[]) => {
     deleteCatalog.run(merchantId);
     for (const product of products) insert.run(product);
@@ -145,7 +156,16 @@ export function createProductRepository(db: Db): ProductRepository {
 
     listFlagged: (merchantId) => (flagged.all(merchantId) as ProductRecord[]).map(toProduct),
 
-    decrementStock: () => notImplemented("step 5"),
+    decrementStock: (merchantId, sku, qty) => {
+      if (!Number.isSafeInteger(qty) || qty <= 0)
+        throw new Error("decrementStock: qty must be > 0");
+      return decrement.run({ merchantId, sku, qty }).changes === 1;
+    },
+
+    restoreStock: (merchantId, sku, qty) => {
+      if (!Number.isSafeInteger(qty) || qty <= 0) throw new Error("restoreStock: qty must be > 0");
+      restore.run({ merchantId, sku, qty });
+    },
 
     countByFirewallStatus: (merchantId) =>
       counts.get(merchantId) as { total: number; clean: number; flagged: number },

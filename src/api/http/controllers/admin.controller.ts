@@ -3,9 +3,11 @@ import { z } from "zod";
 import type { Services } from "../../../services";
 import { CreateMerchantRequest } from "../../../schemas/merchant.schema";
 import { ColumnOverrides } from "../../../schemas/product.schema";
+import { FulfilmentRequest } from "../../../schemas/order.schema";
 import { AppError } from "../../../shared/errors";
 
 type MerchantParams = { merchantId: string };
+type OrderParams = { merchantId: string; orderId: string };
 
 const MappingQuery = z.object({ mapping: z.string().max(10_000).optional() });
 
@@ -80,6 +82,13 @@ export function createAdminController(s: Services) {
 
     orders(req: Request<MerchantParams>, res: Response) {
       res.json(s.dashboard.orders(req.params.merchantId));
+    },
+
+    /** Simulated shipping for the demo (FR-12): CAPTURED -> SHIPPED -> DELIVERED. */
+    fulfil(req: Request<OrderParams>, res: Response) {
+      const { status } = FulfilmentRequest.parse(req.body);
+      s.orders.fulfil(req.params.merchantId, req.params.orderId, status);
+      res.json(s.tracking.track(req.params.merchantId, req.params.orderId));
     },
   };
 }

@@ -8,8 +8,8 @@ Contract source: `src/schemas/`. Shapes may change until the Nov 9 freeze. Error
 | ------ | ------------------------------ | --------------- | ------------------------------------------------- | ------ |
 | POST   | `/m/{id}/api/search`           | `SearchRequest` | `{ results: ProductView[] }`                      | yes    |
 | POST   | `/m/{id}/api/quote`            | `QuoteRequest`  | `QuotePass` or `QuoteFail`                        | yes    |
-| POST   | `/m/{id}/api/order`            | `{ quote_id }`  | `201 { order_id, quote_id, status, approve_url }` | step 5 |
-| GET    | `/m/{id}/api/track/{order_id}` | —               | `{ order_id, status, history[] }`                 | step 5 |
+| POST   | `/m/{id}/api/order`            | `{ quote_id }`  | `201 { order_id, quote_id, status, approve_url }` | yes    |
+| GET    | `/m/{id}/api/track/{order_id}` | —               | `{ order_id, status, history[], approve_url? }`   | yes    |
 | GET    | `/m/{id}/openapi.json`         | —               | OpenAPI 3.1 document                              | step 9 |
 
 Optional headers: `X-Agent-Id` (agent name, self-declared), `X-Simulated: 1` (simulator traffic), `X-Request-Id`.
@@ -141,17 +141,84 @@ name and category first, then cheaper.
 
 `PRODUCT_FLAGGED` and `SKU_NOT_FOUND` return only `reason_codes` and `retry_hint`. Codes: [errors.md](errors.md).
 
+### Order
+
+```json
+{ "quote_id": "q_SGeJ9TZBgMKnPJMV" }
+```
+
+Creates a PayPal sandbox order for exactly the locked quote and answers `201`:
+
+```json
+{
+  "order_id": "o_3kQ9…",
+  "quote_id": "q_SGeJ9TZBgMKnPJMV",
+  "status": "CREATED",
+  "approve_url": "https://www.sandbox.paypal.com/checkoutnow?token=…"
+}
+```
+
+- The human approves the payment at `approve_url`. PayPal then sends them to `/paypal/return`, which
+  captures the payment (below). The agent never touches the money.
+- One order per quote: `/order` again with the same `quote_id` returns the same order with its current
+  status and does not call PayPal again. PayPal also deduplicates the create by request id (the quote id).
+- PayPal charges the locked quote total, even if the catalog price changed after the quote.
+- Refused before any payment exists: unknown quote (`404 QUOTE_NOT_FOUND`), expired quote
+  (`409 QUOTE_EXPIRED`), stored terms that no longer match the quote hash (`409 QUOTE_HASH_MISMATCH`),
+  product sold out (`409 OUT_OF_STOCK`) or flagged (`409 PRODUCT_FLAGGED`). Without PayPal credentials
+  on the server: `503 PAYMENT_NOT_CONFIGURED`.
+
+### Track
+
+`GET /m/{id}/api/track/{order_id}`:
+
+```json
+{
+  "order_id": "o_3kQ9…",
+  "status": "SHIPPED",
+  "history": [
+    { "status": "CREATED", "at": "2026-11-09T10:00:00.000Z" },
+    { "status": "CAPTURED", "at": "2026-11-09T10:02:41.000Z" },
+    { "status": "SHIPPED", "at": "2026-11-09T11:00:00.000Z" }
+  ]
+}
+```
+
+The status is the latest event; the history is oldest first and never rewritten. While the order waits
+for the human (`CREATED`) the response also carries `approve_url`, so an agent can share it again.
+
+| Status                         | Meaning                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| `CREATED`                      | PayPal order exists; waiting for the human to approve                        |
+| `CAPTURED`                     | paid; stock reserved                                                         |
+| `CAPTURE_FAILED`               | not paid (sold out, refused by PayPal, or PayPal down); the return can retry |
+| `SHIPPED`, `DELIVERED`         | simulated fulfilment (admin route below)                                     |
+| `RETURN_REQUESTED`, `REFUNDED` | returns (not built yet)                                                      |
+
+### PayPal return and cancel
+
+`/paypal/return?token=<PayPal order id>` is the page PayPal sends the human to after approving. It shows a
+plain page and:
+
+1. reserves the stock with one conditional update (`stock >= quantity`), so stock never goes negative;
+2. captures the payment with `PayPal-Request-Id` = our order id, so a retry can never charge twice;
+3. on any failure gives the stock back and records `CAPTURE_FAILED` with the reason; reloading the page
+   retries safely. Two simultaneous hits share one capture, and a paid order is never captured again.
+
+`/paypal/cancel` only shows a page; the order stays `CREATED` until PayPal expires it.
+
 ## Merchant / admin — `Authorization: Bearer <ADMIN_TOKEN>`
 
-| Method | Path                                             | Purpose                                                                      | Built  |
-| ------ | ------------------------------------------------ | ---------------------------------------------------------------------------- | ------ |
-| POST   | `/admin/merchants`                               | create a store: `{ name, currency?, paypal_payee_email? }` → `201 StoreInfo` | yes    |
-| GET    | `/admin/merchants/{id}`                          | `StoreInfo`: MCP URL, OpenAPI URL, product counts, flagged products          | yes    |
-| POST   | `/admin/merchants/{id}/catalog/preview?mapping=` | CSV body → `CatalogPreview`; nothing is saved                                | yes    |
-| POST   | `/admin/merchants/{id}/catalog/commit?mapping=`  | CSV body → `StoreInfo`; replaces the catalog                                 | yes    |
-| GET    | `/admin/merchants/{id}/telemetry?after_id=`      | live feed                                                                    | step 8 |
-| GET    | `/admin/merchants/{id}/quotes/summary`           | pass/fail + drop-off by reason                                               | step 8 |
-| GET    | `/admin/merchants/{id}/orders`                   | orders + hash verification                                                   | step 8 |
+| Method | Path                                                 | Purpose                                                                        | Built  |
+| ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------ | ------ |
+| POST   | `/admin/merchants`                                   | create a store: `{ name, currency?, paypal_payee_email? }` → `201 StoreInfo`   | yes    |
+| GET    | `/admin/merchants/{id}`                              | `StoreInfo`: MCP URL, OpenAPI URL, product counts, flagged products            | yes    |
+| POST   | `/admin/merchants/{id}/catalog/preview?mapping=`     | CSV body → `CatalogPreview`; nothing is saved                                  | yes    |
+| POST   | `/admin/merchants/{id}/catalog/commit?mapping=`      | CSV body → `StoreInfo`; replaces the catalog                                   | yes    |
+| GET    | `/admin/merchants/{id}/telemetry?after_id=`          | live feed                                                                      | step 8 |
+| GET    | `/admin/merchants/{id}/quotes/summary`               | pass/fail + drop-off by reason                                                 | step 8 |
+| GET    | `/admin/merchants/{id}/orders`                       | orders + hash verification                                                     | step 8 |
+| POST   | `/admin/merchants/{id}/orders/{order_id}/fulfilment` | `{ "status": "SHIPPED" \| "DELIVERED" }` → the track view (simulated shipping) | yes    |
 
 ### Catalog upload
 
@@ -192,10 +259,13 @@ Preview response (abridged):
 }
 ```
 
+Fulfilment is simulated for the demo: only `CAPTURED → SHIPPED → DELIVERED`; anything else answers
+`409 INVALID_TRANSITION`.
+
 ## Other
 
-| Method | Path                    | Purpose                                           |
-| ------ | ----------------------- | ------------------------------------------------- |
-| GET    | `/health`               | liveness                                          |
-| GET    | `/paypal/return?token=` | PayPal redirect after approval → capture (step 5) |
-| GET    | `/paypal/cancel`        | PayPal redirect on cancel                         |
+| Method | Path                    | Purpose                                                |
+| ------ | ----------------------- | ------------------------------------------------------ |
+| GET    | `/health`               | liveness                                               |
+| GET    | `/paypal/return?token=` | PayPal redirect after approval → capture (HTML page)   |
+| GET    | `/paypal/cancel`        | PayPal redirect on cancel (HTML page, nothing changes) |

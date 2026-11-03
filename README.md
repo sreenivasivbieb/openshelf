@@ -65,6 +65,16 @@ Full setup: [docs/guides/getting-started.md](docs/guides/getting-started.md).
 
 ## Status
 
-Skeleton (2026-11-03). Real: boot sequence, config, logging, migrations + schema, middlewares, route table,
-contracts, MCP tool definitions, Docker. Stubs return `501 NOT_IMPLEMENTED` and are marked `TODO(step N)`;
-see the [build plan](docs/planning/build-plan.md).
+Build steps 1–4 done (2026-11-03):
+
+- CSV upload with a preview and per-row problems, then a strict commit.
+- Rules-based prompt firewall on every product.
+- `/search` over firewall-clean products only.
+- `/quote` with deterministic guardrails:
+  - every failed rule, plus the product's real terms and the nearest passing product;
+  - SHA-256 locked quotes that an agent can verify itself.
+- One telemetry row per agent call.
+- `pnpm db:seed` creates the demo store `m_demo`.
+
+Next: step 5, PayPal checkout and `/order`. Unbuilt routes return `501 NOT_IMPLEMENTED` and are marked
+`TODO(step N)`; see the [build plan](docs/planning/build-plan.md).

@@ -1,26 +1,152 @@
-import type { ProductRow } from "../schemas/product.schema";
-import type { CanonicalColumn } from "../domain/column-mapping";
+import { CsvError, parse } from "csv-parse/sync";
+import { ProductRow, type ColumnOverrides } from "../schemas/product.schema";
+import type { RowError } from "../schemas/merchant.schema";
+import { mapColumns, type CanonicalColumn } from "../domain/column-mapping";
+import { parseNumberCell, parseTextCell, skuFromName } from "../domain/csv-cells";
 import type { LlmClient } from "../integrations/llm/llm-client";
-import { notImplemented } from "../shared/errors";
+import { AppError } from "../shared/errors";
+
+export const MAX_CATALOG_ROWS = 5000;
+
+const NUMBER_COLUMNS: ReadonlySet<CanonicalColumn> = new Set([
+  "price",
+  "stock",
+  "shipping_days",
+  "return_days",
+  "rating_avg",
+  "review_count",
+]);
 
 export interface IngestionReport {
+  headers: string[];
   mapping: Record<string, CanonicalColumn>;
   unmapped: string[];
-  suggestions: Record<string, CanonicalColumn>; // LLM guesses for unmapped headers; merchant confirms
+  missingRequired: CanonicalColumn[];
+  suggestions: Record<string, CanonicalColumn>;
+  totalRows: number; // non-blank data rows
   rows: ProductRow[];
-  errors: { row: number; column: string; message: string }[];
+  errors: RowError[];
 }
 
 export interface IngestionService {
-  parse(csv: string, mappingOverrides?: Record<string, CanonicalColumn>): Promise<IngestionReport>;
+  parse(csv: string, overrides?: ColumnOverrides): Promise<IngestionReport>;
+}
+
+/** Comma, semicolon (European Excel) or tab: whichever splits the header row most. */
+export function detectDelimiter(csv: string): "," | ";" | "\t" {
+  const header = csv.split(/\r?\n/, 1)[0] ?? "";
+  const count = (d: string) => header.split(d).length - 1;
+  return ([",", ";", "\t"] as const).reduce((best, d) => (count(d) > count(best) ? d : best), ",");
+}
+
+function readCsv(csv: string): string[][] {
+  try {
+    return parse(csv, {
+      bom: true,
+      delimiter: detectDelimiter(csv),
+      relax_column_count: true, // row width is checked below, with a row number
+      relax_quotes: true, // 12" vase
+      skip_empty_lines: false, // keep record index == spreadsheet row
+    });
+  } catch (err) {
+    if (err instanceof CsvError)
+      throw new AppError("INVALID_CSV", `Could not read the CSV: ${err.message}`, 400);
+    throw err;
+  }
 }
 
 /**
- * FR-01, FR-02. Build step 2. csv-parse -> mapColumns (synonyms) -> optional LLM suggestions
- * (only when llm is set) -> ProductRow.safeParse per row -> errors carry the CSV row number.
+ * FR-01, FR-02. CSV -> header mapping -> per-row cell parsing -> ProductRow validation.
+ * Every problem carries the spreadsheet row number and the merchant's own header name.
  */
 export function createIngestionService(_deps: { llm: LlmClient | null }): IngestionService {
   return {
-    parse: async () => notImplemented("step 2"),
+    async parse(csv, overrides = {}) {
+      const [headerCells, ...records] = readCsv(csv);
+      if (!headerCells || headerCells.every((cell) => !cell.trim())) {
+        throw new AppError("INVALID_CSV", "The file is empty or has no header row.", 400);
+      }
+      const headers = headerCells.map((cell) => cell.trim());
+      const { columns, mapping, unmapped, missingRequired } = mapColumns(headers, overrides);
+      // TODO(step 9): when an LLM is configured, suggest columns for `unmapped` headers.
+      const suggestions: Record<string, CanonicalColumn> = {};
+
+      const dataRows = records
+        .map((cells, i) => ({ cells, row: i + 2 })) // header is spreadsheet row 1
+        .filter(({ cells }) => cells.some((cell) => cell.trim()));
+      if (dataRows.length > MAX_CATALOG_ROWS) {
+        throw new AppError(
+          "TOO_MANY_ROWS",
+          `A catalog upload can have at most ${MAX_CATALOG_ROWS} products.`,
+          413,
+        );
+      }
+
+      const report: IngestionReport = {
+        headers,
+        mapping,
+        unmapped,
+        missingRequired,
+        suggestions,
+        totalRows: dataRows.length,
+        rows: [],
+        errors: [],
+      };
+      if (missingRequired.length) return report; // rows cannot be validated without required columns
+
+      const headerOf = (column: string) =>
+        headers[columns.indexOf(column as CanonicalColumn)] ?? column;
+      const skuIsGenerated = !columns.includes("sku");
+      const firstRowOfSku = new Map<string, number>();
+
+      for (const { cells, row } of dataRows) {
+        if (cells.length > headers.length) {
+          report.errors.push({
+            row,
+            column: "(row)",
+            message: `has ${cells.length} cells but the header has ${headers.length}; put quotes around cells that contain the delimiter`,
+          });
+          continue;
+        }
+
+        const input: Record<string, unknown> = {};
+        columns.forEach((column, i) => {
+          if (column)
+            input[column] = NUMBER_COLUMNS.has(column)
+              ? parseNumberCell(cells[i])
+              : parseTextCell(cells[i]);
+        });
+        if (input.sku === undefined && typeof input.name === "string")
+          input.sku = skuFromName(input.name);
+
+        const parsed = ProductRow.safeParse(input);
+        if (!parsed.success) {
+          for (const issue of parsed.error.issues) {
+            report.errors.push({
+              row,
+              column: headerOf(String(issue.path[0] ?? "(row)")),
+              message: issue.message,
+            });
+          }
+          continue;
+        }
+
+        const { sku } = parsed.data;
+        const firstRow = firstRowOfSku.get(sku);
+        if (firstRow !== undefined) {
+          report.errors.push({
+            row,
+            column: headerOf("sku"),
+            message: skuIsGenerated
+              ? `same name as row ${firstRow}; add a SKU column or make product names unique`
+              : `duplicate SKU "${sku}" (first used on row ${firstRow})`,
+          });
+          continue;
+        }
+        firstRowOfSku.set(sku, row);
+        report.rows.push(parsed.data);
+      }
+      return report;
+    },
   };
 }

@@ -15,10 +15,49 @@ export interface TelemetryRepository {
   countQuotes(merchantId: string): { pass: number; fail: number };
 }
 
-/** Table: telemetry. Build steps 7-8. */
-export function createTelemetryRepository(_db: Db): TelemetryRepository {
+const MAX_REQUEST_JSON = 4000;
+
+/** Always valid JSON, bounded in size: oversized requests keep a truncated preview. */
+function requestJson(request: unknown): string {
+  let json: string;
+  try {
+    json = JSON.stringify(request) ?? "null";
+  } catch {
+    json = JSON.stringify("<unserializable request>");
+  }
+  return json.length <= MAX_REQUEST_JSON
+    ? json
+    : JSON.stringify({ truncated: true, preview: json.slice(0, MAX_REQUEST_JSON) });
+}
+
+/** Table: telemetry. */
+export function createTelemetryRepository(db: Db): TelemetryRepository {
+  const insert = db.prepare(
+    `INSERT INTO telemetry (merchant_id, agent_id, channel, tool, request_json, outcome, error_code,
+       reason_codes, quote_id, order_id, latency_ms, is_simulated, created_at)
+     VALUES (@merchantId, @agentId, @channel, @tool, @requestJson, @outcome, @errorCode,
+       @reasonCodes, @quoteId, @orderId, @latencyMs, @isSimulated, @createdAt)`,
+  );
+
   return {
-    insert: () => notImplemented("step 7"),
+    insert: (e) =>
+      Number(
+        insert.run({
+          merchantId: e.merchantId,
+          agentId: e.agentId,
+          channel: e.channel,
+          tool: e.tool,
+          requestJson: requestJson(e.request),
+          outcome: e.outcome,
+          errorCode: e.errorCode,
+          reasonCodes: e.reasonCodes ? JSON.stringify(e.reasonCodes) : null,
+          quoteId: e.quoteId,
+          orderId: e.orderId,
+          latencyMs: e.latencyMs,
+          isSimulated: e.isSimulated ? 1 : 0,
+          createdAt: e.createdAt,
+        }).lastInsertRowid,
+      ),
     listAfter: () => notImplemented("step 8"),
     failuresByReason: () => notImplemented("step 8"),
     countQuotes: () => notImplemented("step 8"),

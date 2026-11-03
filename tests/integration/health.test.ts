@@ -9,6 +9,9 @@ beforeAll(async () => {
 });
 afterAll(() => http.close());
 
+const postJson = (path: string, body: string) =>
+  http.fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body });
+
 describe("http skeleton", () => {
   it("serves /health with the injected clock", async () => {
     const res = await http.fetch("/health");
@@ -23,22 +26,21 @@ describe("http skeleton", () => {
   });
 
   it("validates agent input before any service runs", async () => {
-    const res = await http.fetch("/m/m_1/api/quote", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sku: "", max_budget: -5 }),
-    });
+    const res = await postJson("/m/m_1/api/quote", JSON.stringify({ sku: "", max_budget: -5 }));
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("INVALID_INPUT");
   });
 
+  it("answers 400, not 500, for malformed JSON", async () => {
+    const res = await postJson("/m/m_1/api/quote", "{not json");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("INVALID_JSON");
+  });
+
   it("answers 501 for routes that are not built yet", async () => {
-    const res = await http.fetch("/m/m_1/api/search", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ query: "mug" }),
-    });
+    const res = await postJson("/m/m_1/api/order", JSON.stringify({ quote_id: "q_1" })); // step 5
     expect(res.status).toBe(501);
   });
 });

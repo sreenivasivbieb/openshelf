@@ -9,11 +9,44 @@ export interface MerchantRepository {
   saveSpec(id: string, specJson: string, status: SpecStatus): void;
 }
 
-/** Table: merchants. Build steps 1 and 9. */
-export function createMerchantRepository(_db: Db): MerchantRepository {
+interface MerchantRecord {
+  id: string;
+  name: string;
+  currency: string;
+  paypal_payee_email: string | null;
+  spec_json: string | null;
+  spec_status: SpecStatus;
+  created_at: string;
+}
+
+function toMerchant(r: MerchantRecord): Merchant {
   return {
-    insert: () => notImplemented("step 1"),
-    findById: () => notImplemented("step 1"),
+    id: r.id,
+    name: r.name,
+    currency: r.currency,
+    paypalPayeeEmail: r.paypal_payee_email,
+    specJson: r.spec_json,
+    specStatus: r.spec_status,
+    createdAt: r.created_at,
+  };
+}
+
+/** Table: merchants. */
+export function createMerchantRepository(db: Db): MerchantRepository {
+  const insert = db.prepare(
+    `INSERT INTO merchants (id, name, currency, paypal_payee_email, spec_json, spec_status, created_at)
+     VALUES (@id, @name, @currency, @paypalPayeeEmail, @specJson, @specStatus, @createdAt)`,
+  );
+  const byId = db.prepare(`SELECT * FROM merchants WHERE id = ?`);
+
+  return {
+    insert: (merchant) => {
+      insert.run(merchant);
+    },
+    findById: (id) => {
+      const record = byId.get(id) as MerchantRecord | undefined;
+      return record ? toMerchant(record) : null;
+    },
     saveSpec: () => notImplemented("step 9"),
   };
 }

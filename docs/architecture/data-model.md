@@ -22,3 +22,11 @@ erDiagram
 | `telemetry`    | one row per agent call                                                       | insert-only (trigger) |
 
 Why insert-only and hashed: [ADR-0006](../adr/0006-quote-hash-and-insert-only-records.md).
+
+**Search index.** `products_fts` (FTS5, porter stemming) holds name, agent description and category,
+keyed by `(merchant_id, sku)` and kept in sync by triggers; only text changes reindex, so stock updates
+stay cheap. Migration 002 replaced the original rowid link, because the implicit rowid of a table with a
+composite primary key may change on VACUUM.
+
+**Telemetry errors.** `telemetry.error_code` (002) holds the error code of failed agent calls
+(`INVALID_INPUT`, `MERCHANT_NOT_FOUND`, …).

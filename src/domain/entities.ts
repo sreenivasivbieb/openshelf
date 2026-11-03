@@ -80,6 +80,7 @@ export interface TelemetryEvent {
   tool: AgentTool;
   request: unknown;
   outcome: "ok" | "pass" | "fail" | "error";
+  errorCode: string | null; // AppError code when outcome = "error"
   reasonCodes: QuoteReasonCode[] | null;
   quoteId: string | null;
   orderId: string | null;

@@ -4,7 +4,7 @@ import type { Services } from "../../../services";
 import type { Clock } from "../../../shared/clock";
 import { adminAuth } from "../middlewares/admin-auth";
 import { agentContext } from "../middlewares/agent-context";
-import { agentRateLimit } from "../middlewares/rate-limit";
+import { createAgentRateLimit } from "../middlewares/rate-limit";
 import { createHealthRouter } from "./health.routes";
 import { createAdminRouter } from "./admin.routes";
 import { createStoreRouter } from "./store.routes";
@@ -39,7 +39,7 @@ export function createApiRouter(o: ApiOptions): Router {
   );
 
   const store = Router({ mergeParams: true });
-  store.use(agentContext, agentRateLimit);
+  store.use(agentContext, createAgentRateLimit());
   store.use("/api", createStoreRouter(o.services));
   store.all("/mcp", createMcpHandler(o.services));
   store.get("/openapi.json", createStoreController(o.services).openapi);

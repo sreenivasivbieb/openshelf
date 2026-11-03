@@ -5,31 +5,39 @@ import { QuoteRequest } from "../../../schemas/quote.schema";
 import { OrderRequest } from "../../../schemas/order.schema";
 import { getAgentContext } from "../middlewares/agent-context";
 
-/** Buyer-facing REST (FR-07, FR-08, FR-11, FR-12). Validate -> telemetry.record(service call) -> JSON. */
+/**
+ * Buyer-facing REST (FR-07, FR-08, FR-11, FR-12). Every handler is one telemetry.record() call;
+ * validation happens inside it, so malformed agent calls are logged too (NFR-06).
+ */
 export function createStoreController(s: Services) {
   return {
     async search(req: Request, res: Response) {
       const ctx = getAgentContext(res);
-      const input = SearchRequest.parse(req.body);
       res.json(
-        await s.telemetry.record(ctx, "search", input, () =>
-          s.catalog.search(ctx.merchantId, input),
+        await s.telemetry.record(ctx, "search", req.body, () =>
+          s.catalog.search(ctx.merchantId, SearchRequest.parse(req.body)),
         ),
       );
     },
 
     async quote(req: Request, res: Response) {
       const ctx = getAgentContext(res);
-      const input = QuoteRequest.parse(req.body);
-      res.json(await s.telemetry.record(ctx, "quote", input, () => s.quotes.create(ctx, input)));
+      res.json(
+        await s.telemetry.record(ctx, "quote", req.body, () =>
+          s.quotes.create(ctx, QuoteRequest.parse(req.body)),
+        ),
+      );
     },
 
     async order(req: Request, res: Response) {
       const ctx = getAgentContext(res);
-      const input = OrderRequest.parse(req.body);
       res
         .status(201)
-        .json(await s.telemetry.record(ctx, "order", input, () => s.orders.place(ctx, input)));
+        .json(
+          await s.telemetry.record(ctx, "order", req.body, () =>
+            s.orders.place(ctx, OrderRequest.parse(req.body)),
+          ),
+        );
     },
 
     async track(req: Request<{ orderId: string }>, res: Response) {

@@ -2,11 +2,41 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import type { Services } from "../../../services";
 import { CreateMerchantRequest } from "../../../schemas/merchant.schema";
-import type { CanonicalColumn } from "../../../domain/column-mapping";
+import { ColumnOverrides } from "../../../schemas/product.schema";
+import { AppError } from "../../../shared/errors";
 
 type MerchantParams = { merchantId: string };
 
-const CommitQuery = z.object({ mapping: z.string().optional() }); // JSON: { "<header>": "<column>" }
+const MappingQuery = z.object({ mapping: z.string().max(10_000).optional() });
+
+/** The CSV travels as the raw request body (Content-Type: text/csv). */
+function csvBody(req: Request): string {
+  if (typeof req.body !== "string" || !req.body.trim()) {
+    throw new AppError(
+      "CSV_REQUIRED",
+      "Send the CSV file as the request body with Content-Type: text/csv.",
+      400,
+    );
+  }
+  return req.body;
+}
+
+/** ?mapping={"Merchant header":"price",...}: the merchant's corrections from the review step. */
+function mappingOverrides(req: Request): ColumnOverrides {
+  const { mapping } = MappingQuery.parse(req.query);
+  if (!mapping) return {};
+  let json: unknown;
+  try {
+    json = JSON.parse(mapping);
+  } catch {
+    throw new AppError(
+      "INVALID_MAPPING",
+      'mapping must be JSON like {"Selling Price":"price"}.',
+      400,
+    );
+  }
+  return ColumnOverrides.parse(json);
+}
 
 /** Merchant onboarding + dashboard API (FR-01..06, FR-15). */
 export function createAdminController(s: Services) {
@@ -17,15 +47,21 @@ export function createAdminController(s: Services) {
 
     async previewCatalog(req: Request<MerchantParams>, res: Response) {
       res.json(
-        await s.onboarding.previewCatalog(req.params.merchantId, z.string().parse(req.body)),
+        await s.onboarding.previewCatalog(
+          req.params.merchantId,
+          csvBody(req),
+          mappingOverrides(req),
+        ),
       );
     },
 
     async commitCatalog(req: Request<MerchantParams>, res: Response) {
-      const { mapping } = CommitQuery.parse(req.query);
-      const parsed = (mapping ? JSON.parse(mapping) : {}) as Record<string, CanonicalColumn>;
       res.json(
-        await s.onboarding.commitCatalog(req.params.merchantId, z.string().parse(req.body), parsed),
+        await s.onboarding.commitCatalog(
+          req.params.merchantId,
+          csvBody(req),
+          mappingOverrides(req),
+        ),
       );
     },
 

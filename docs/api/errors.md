@@ -1,15 +1,29 @@
 # Errors and reason codes
 
-Error body: `{ "error": { "code": "<CODE>", "message": "<text>" } }`.
+Error body: `{ "error": { "code": "<CODE>", "message": "<text>" } }`. Codes are stable; messages are for humans.
 
-| HTTP | Code                     | When                                         |
-| ---- | ------------------------ | -------------------------------------------- |
-| 400  | `INVALID_INPUT`          | body/query failed Zod validation             |
-| 401  | `UNAUTHORIZED`           | missing or wrong admin token                 |
-| 429  | `RATE_LIMITED`           | too many requests from one IP                |
-| 501  | `NOT_IMPLEMENTED`        | route exists, feature not built yet          |
-| 503  | `PAYMENT_NOT_CONFIGURED` | PayPal credentials not set on the server     |
-| 500  | `INTERNAL`               | anything unexpected (logged with request id) |
+| HTTP | Code                     | When                                                                         |
+| ---- | ------------------------ | ---------------------------------------------------------------------------- |
+| 400  | `INVALID_INPUT`          | body or query failed validation                                              |
+| 400  | `INVALID_JSON`           | body is not valid JSON                                                       |
+| 400  | `CSV_REQUIRED`           | catalog upload without a `text/csv` body                                     |
+| 400  | `INVALID_CSV`            | empty file, no header row, or unreadable CSV (e.g. an unclosed quote)        |
+| 400  | `INVALID_MAPPING`        | `mapping` query is not JSON                                                  |
+| 401  | `UNAUTHORIZED`           | missing or wrong admin token                                                 |
+| 404  | `MERCHANT_NOT_FOUND`     | no store with that id                                                        |
+| 409  | `MERCHANT_EXISTS`        | store id already taken (seed script only)                                    |
+| 413  | `PAYLOAD_TOO_LARGE`      | body over the limit (100 kB JSON, 2 MB CSV)                                  |
+| 413  | `TOO_MANY_ROWS`          | more than 5,000 products in one upload                                       |
+| 422  | `MISSING_COLUMNS`        | commit without a column for name, price, stock, shipping days or return days |
+| 422  | `CATALOG_HAS_ERRORS`     | commit of a file that still has row problems (preview lists them)            |
+| 422  | `CATALOG_EMPTY`          | header row but no products                                                   |
+| 429  | `RATE_LIMITED`           | too many requests from one IP                                                |
+| 501  | `NOT_IMPLEMENTED`        | route exists, feature not built yet                                          |
+| 503  | `PAYMENT_NOT_CONFIGURED` | PayPal credentials not set on the server                                     |
+| 500  | `INTERNAL`               | anything unexpected (logged with the request id)                             |
+
+Telemetry: every call that reaches a store route is logged, failures with `outcome = error` and the code
+above. Malformed JSON and rate-limited requests are rejected before that point and are not logged.
 
 ## Quote reason codes (`src/domain/enums.ts`) — append-only, never renamed
 

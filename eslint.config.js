@@ -33,11 +33,14 @@ const layer = (files, patterns) => ({
 });
 
 export default tseslint.config(
-  { ignores: ["dist/**", "coverage/**", "node_modules/**", "storage/**"] },
+  { ignores: ["dist/**", "coverage/**", "node_modules/**", "storage/**", ".claude/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
+      parserOptions: { tsconfigRootDir: import.meta.dirname },
+    },
     rules: { "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }] },
   },
   layer(["src/**/*.ts"], [NO_BOOTSTRAP]),
